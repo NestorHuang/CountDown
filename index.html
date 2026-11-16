@@ -122,6 +122,13 @@
     <label><input type="checkbox" id="soundOn"> 時間到時發出嗶聲，響 <input class="field" type="number" min="1" max="60" id="alarmDur"> 秒</label>
     <label style="padding-left:30px">時間到後沒人按的話，每隔 <input class="field" type="number" min="0" max="3600" id="repeatSec"> 秒再響一次　<span style="color:var(--muted);font-size:15px">（0 ＝ 只響一次）</span></label>
     <label><input type="checkbox" id="preAlertSound"> 到達每段的「預先提醒」時間時發出提示音，響 <input class="field" type="number" min="1" max="60" id="preDur"> 秒（數字同時變<b style="color:var(--warn)">黃色</b>）</label>
+    <label style="padding-left:30px">預先提醒聲音
+      <select class="field" id="preSound" style="width:auto;text-align:left">
+        <option value="chime">鐘聲「叮—噹」（推薦）</option>
+        <option value="soft">柔和單聲「嘟—」（最低調）</option>
+        <option value="triple">三連音「嘟嘟嘟」（較明顯）</option>
+        <option value="dingdong">電子「叮咚」（舊版）</option>
+      </select></label>
     <label><input type="checkbox" id="preBeep"> 最後 5 秒每秒輕響一聲</label>
   </div>
 
@@ -173,7 +180,7 @@
       { name: '報告', h: 0, m: 10, s: 0, pm: 2, ps: 0 },
       { name: 'Q&A', h: 0, m: 3, s: 0, pm: 1, ps: 0 },
     ],
-    dangerSec: 10, soundOn: true, preAlertSound: true, preBeep: true, alarmDur: 3, preDur: 3, rounds: 1, repeatSec: 10, volume: 100,
+    dangerSec: 10, soundOn: true, preAlertSound: true, preBeep: true, alarmDur: 3, preDur: 3, rounds: 1, repeatSec: 10, volume: 100, preSound: 'chime',
   };
   try {
     const saved = JSON.parse(localStorage.getItem(STORE_KEY));
@@ -244,10 +251,10 @@
 
   const MINS = { alarmDur: 1, preDur: 1, rounds: 1 };
   [['dangerSec', 'value'], ['soundOn', 'checked'], ['preAlertSound', 'checked'], ['preBeep', 'checked'],
-   ['alarmDur', 'value'], ['preDur', 'value'], ['rounds', 'value'], ['repeatSec', 'value'], ['volume', 'value']].forEach(([id, prop]) => {
+   ['alarmDur', 'value'], ['preDur', 'value'], ['rounds', 'value'], ['repeatSec', 'value'], ['volume', 'value'], ['preSound', 'value']].forEach(([id, prop]) => {
     const el = $(id); el[prop] = cfg[id];
     el.addEventListener('input', () => {
-      cfg[id] = prop === 'value' ? Math.max(MINS[id] || 0, parseInt(el.value, 10) || 0) : el.checked;
+      cfg[id] = id === 'preSound' ? el.value : prop === 'value' ? Math.max(MINS[id] || 0, parseInt(el.value, 10) || 0) : el.checked;
       if (id === 'rounds') renderTotal(); save(); });
   });
 
@@ -260,26 +267,53 @@
   }
   // 音量：vol 為相對比例（1 = 最大），再乘上使用者設定的音量 %
   // 包絡：5ms 快速拉到最大 → 全程維持 → 最後 15ms 收尾（避免爆音，同時保持最大響度）
-  function tone(freq, start, dur, vol) {
+  const volScale = (vol) => Math.min(1, vol * (Math.max(10, Math.min(100, cfg.volume || 100)) / 100));
+  const track = (o) => { playing.push(o); o.onended = () => { playing = playing.filter((x) => x !== o); }; };
+  // 一般音：attack 毫秒內拉到最大 → 維持 → release 收尾
+  function tone(freq, start, dur, vol, type = 'square', attack = 0.005, release = 0.015) {
     const a = audio(); if (!a) return;
-    const o = a.createOscillator(), g = a.createGain(), t = a.currentTime + start;
-    const v = Math.min(1, vol * (Math.max(10, Math.min(100, cfg.volume || 100)) / 100));
-    o.type = 'square'; o.frequency.value = freq;
+    const o = a.createOscillator(), g = a.createGain(), t = a.currentTime + start, v = volScale(vol);
+    o.type = type; o.frequency.value = freq;
     g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(v, t + 0.005);
-    g.gain.setValueAtTime(v, t + dur - 0.015);
+    g.gain.linearRampToValueAtTime(v, t + attack);
+    g.gain.setValueAtTime(v, t + dur - release);
     g.gain.linearRampToValueAtTime(0, t + dur);
     o.connect(g).connect(a.destination); o.start(t); o.stop(t + dur + 0.02);
-    playing.push(o); o.onended = () => { playing = playing.filter((x) => x !== o); };
+    track(o);
+  }
+  // 鐘聲：基音＋泛音（正弦波），瞬間敲響後自然衰減；高泛音衰減得比較快，聽起來像敲鐘
+  function bell(freq, start, decay, vol) {
+    const a = audio(); if (!a) return;
+    const t = a.currentTime + start, v = volScale(vol);
+    [[1, 0.6, 1], [2, 0.25, 0.6], [3, 0.1, 0.4], [4.2, 0.05, 0.25]].forEach(([mul, amp, dk]) => {
+      const o = a.createOscillator(), g = a.createGain(), d = decay * dk;
+      o.type = 'sine'; o.frequency.value = freq * mul;
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(v * amp, t + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      o.connect(g).connect(a.destination); o.start(t); o.stop(t + d + 0.02);
+      track(o);
+    });
   }
   let playing = [];
   function stopSounds() { playing.forEach((o) => { try { o.stop(); } catch (e) {} }); playing = []; }
   // 在 sec 秒內重複一組音型（每組長 period 秒）
   function pattern(sec, period, fn) { const n = Math.max(1, Math.round(sec / period)); for (let i = 0; i < n; i++) fn(i * period); }
   const tick = () => { if (cfg.soundOn && cfg.preBeep) tone(880, 0, 0.08, 0.4); };
-  // 預先提醒：叮—咚，每 1 秒一組，持續 preDur 秒
+  // 預先提醒聲音：都比「時間到」低、慢、聲數少，聽起來是「提醒」而不是「催促」
+  const PRE_SOUNDS = {
+    // 鐘聲 Mi(E5) → Do(C5) 往下走，每 2 秒一組
+    chime: { period: 2, play: (t) => { bell(659.25, t, 1.4, 1); bell(523.25, t + 0.5, 1.6, 1); } },
+    // 柔和單聲 Do(C5)，三角波、緩起緩收，每 1.5 秒一聲
+    soft: { period: 1.5, play: (t) => tone(523.25, t, 0.7, 0.9, 'triangle', 0.06, 0.25) },
+    // 三連音 Do(C5) 三短聲，三角波，每 1.5 秒一組
+    triple: { period: 1.5, play: (t) => { for (let k = 0; k < 3; k++) tone(523.25, t + k * 0.25, 0.15, 0.95, 'triangle', 0.008, 0.03); } },
+    // 舊版電子叮咚（方波，往上走），每 1 秒一組
+    dingdong: { period: 1, play: (t) => { tone(660, t, 0.25, 0.85); tone(880, t + 0.3, 0.35, 0.85); } },
+  };
   const preAlert = () => { if (!cfg.preAlertSound) return;
-    pattern(cfg.preDur || 3, 1, (t) => { tone(660, t, 0.25, 0.85); tone(880, t + 0.3, 0.35, 0.85); }); };
+    const snd = PRE_SOUNDS[cfg.preSound] || PRE_SOUNDS.chime;
+    pattern(cfg.preDur || 3, snd.period, snd.play); };
   // 時間到：「嗶嗶」（同音高兩短聲）＋停頓，每 1 秒一組，持續 alarmDur 秒 → 預設 3 秒 = 嗶嗶 嗶嗶 嗶嗶
   const alarm = () => { if (!cfg.soundOn) return;
     pattern(cfg.alarmDur || 3, 1, (t) => { tone(1046, t, 0.12, 1); tone(1046, t + 0.2, 0.12, 1); }); };
@@ -287,6 +321,7 @@
   const volLbl = () => { $('volLbl').textContent = $('volume').value + '%'; };
   $('volume').addEventListener('input', volLbl); volLbl();
   $('testAlarm').onclick = () => { stopSounds(); const on = cfg.soundOn; cfg.soundOn = true; alarm(); cfg.soundOn = on; };
+  $('preSound').addEventListener('change', () => $('testPre').click());
   $('testPre').onclick = () => { stopSounds(); const on = cfg.preAlertSound; cfg.preAlertSound = true; preAlert(); cfg.preAlertSound = on; };
 
   // ---------- 計時邏輯（以實際時間計算，不會累積誤差） ----------
