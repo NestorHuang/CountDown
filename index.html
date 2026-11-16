@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>多段倒數計時器</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #161a20;
+    --line: #2a313b;
+    --text: #f2f4f7;
+    --muted: #8b95a3;
+    --accent: #3fb6ff;
+    --ok: #f2f4f7;
+    --warn: #ffc23d;
+    --danger: #ff4d4d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif; }
+  button { font: inherit; cursor: pointer; }
+  input { font: inherit; }
+
+  /* ---------- 設定畫面 ---------- */
+  #setup { max-width: 1100px; margin: 0 auto; padding: 32px 16px 80px; }
+  h1 { font-size: 32px; margin: 0 0 6px; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  .seg { display: grid; grid-template-columns: 36px minmax(120px,1fr) auto auto auto; gap: 10px; align-items: center;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+  .seg .no { color: var(--muted); font-size: 20px; text-align: center; font-variant-numeric: tabular-nums; }
+  .seg input[type=text] { width: 100%; }
+  .field { background: #0f1216; border: 1px solid var(--line); color: var(--text); border-radius: 8px;
+    padding: 10px 12px; font-size: 20px; }
+  .field:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .time { display: flex; align-items: center; gap: 4px; }
+  .time input { width: 72px; text-align: center; font-variant-numeric: tabular-nums; }
+  .time span { color: var(--muted); font-size: 16px; }
+  .time .lbl { color: var(--warn); font-size: 15px; margin-right: 2px; white-space: nowrap; }
+  .time.pre input { width: 60px; }
+  .ops { display: flex; gap: 4px; }
+  .icon { background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 8px;
+    width: 38px; height: 38px; font-size: 16px; }
+  .icon:hover { color: var(--text); border-color: var(--muted); }
+  .icon:disabled { opacity: .3; cursor: default; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 16px; }
+  .btn { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 10px;
+    padding: 12px 20px; font-size: 18px; }
+  .btn:hover { border-color: var(--muted); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #001522; font-weight: 700;
+    font-size: 22px; padding: 14px 36px; }
+  .total { color: var(--muted); font-size: 18px; margin-left: auto; font-variant-numeric: tabular-nums; }
+  .opts { margin-top: 28px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .opts h2 { font-size: 18px; margin: 0 0 12px; }
+  .opts label { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 17px; flex-wrap: wrap; }
+  .opts .field { font-size: 17px; padding: 6px 10px; width: 80px; text-align: center; }
+  .keys { margin-top: 20px; color: var(--muted); font-size: 15px; line-height: 1.9; }
+  kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 1px 7px;
+    font-family: inherit; color: var(--text); background: #0f1216; }
+
+  @media (max-width: 900px) {
+    .seg { grid-template-columns: 28px 1fr; }
+    .seg .time, .seg .ops { grid-column: 2; flex-wrap: wrap; }
+    .total { margin-left: 0; width: 100%; }
+  }
+
+  /* ---------- 計時畫面 ---------- */
+  #run { position: fixed; inset: 0; display: none; flex-direction: column; align-items: center;
+    justify-content: center; padding-top: 56px; padding-bottom: 2vh; background: var(--bg); overflow: hidden; user-select: none; }
+  #run.show { display: flex; }
+  #segName { font-size: clamp(28px, 6vh, 90px); font-weight: 700; text-align: center; padding: 0 4vw;
+    line-height: 1.2; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #segInfo { font-size: clamp(16px, 2.6vh, 36px); color: var(--muted); margin-top: .4vh; }
+  #clock { font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+    white-space: nowrap; color: var(--ok); transition: color .3s;
+    font-family: "SF Pro Display", "Segoe UI", "Helvetica Neue", Arial, sans-serif; margin: 1vh 0; }
+  #clock.warn { color: var(--warn); }
+  #clock.danger { color: var(--danger); }
+  #over { font-size: clamp(22px, 5vh, 72px); color: var(--danger); font-weight: 700; min-height: 1.2em;
+    font-variant-numeric: tabular-nums; }
+  #nextUp { font-size: clamp(16px, 3vh, 40px); color: var(--muted); margin-top: 1vh; min-height: 1.3em; text-align: center; padding: 0 4vw; }
+  #hint { font-size: clamp(16px, 2.6vh, 34px); color: var(--text); margin-top: 1.5vh; min-height: 1.3em;
+    opacity: .9; text-align: center; }
+  #over.pre { color: var(--warn); }
+  #bar { position: absolute; left: 0; bottom: 0; height: 1.2vh; min-height: 6px; background: var(--accent);
+    width: 0; transition: width .25s linear, background .3s; }
+  #bar.warn { background: var(--warn); }
+  #bar.danger { background: var(--danger); }
+
+  #run.timeup { animation: flash 1s steps(1) infinite; }
+  @keyframes flash { 0% { background: #5a0b0b; } 50% { background: var(--bg); } }
+  #run.paused #clock { opacity: .45; }
+
+  #ctrl { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: center; gap: 8px;
+    padding: 14px; flex-wrap: wrap; transition: opacity .4s; background: linear-gradient(#000a, transparent); }
+  #run.idle #ctrl { opacity: 0; pointer-events: none; }
+  #run.idle { cursor: none; }
+  #ctrl .btn { font-size: 16px; padding: 8px 14px; background: #161a20cc; }
+</style>
+</head>
+<body>
+
+<section id="setup">
+  <h1>多段倒數計時器</h1>
+  <p class="sub">設定好每一段的名稱、時間與「預先提醒」（例如剩 2 分鐘時先提醒一次，設 0 代表不提醒），按「開始」進入全螢幕計時。時間到會響聲提醒，按空白鍵才進入下一段。</p>
+
+  <div id="list"></div>
+
+  <div class="row">
+    <button class="btn" id="addBtn">＋ 新增一段</button>
+    <button class="btn" id="clearBtn">全部清除</button>
+    <span class="total" id="total"></span>
+  </div>
+
+  <div class="opts">
+    <h2>提醒設定</h2>
+    <label>剩下 <input class="field" type="number" min="0" id="dangerSec"> 秒時數字變<b style="color:var(--danger)">紅色</b></label>
+    <label>音量 <input type="range" min="10" max="100" step="5" id="volume" style="width:220px;accent-color:var(--accent)">
+      <b id="volLbl" style="min-width:48px;font-variant-numeric:tabular-nums"></b>
+      <button type="button" class="btn" id="testAlarm" style="font-size:15px;padding:6px 12px">▶ 試聽時間到</button>
+      <button type="button" class="btn" id="testPre" style="font-size:15px;padding:6px 12px">▶ 試聽預先提醒</button></label>
+    <label><input type="checkbox" id="soundOn"> 時間到時發出嗶聲，響 <input class="field" type="number" min="1" max="60" id="alarmDur"> 秒</label>
+    <label style="padding-left:30px">時間到後沒人按的話，每隔 <input class="field" type="number" min="0" max="3600" id="repeatSec"> 秒再響一次　<span style="color:var(--muted);font-size:15px">（0 ＝ 只響一次）</span></label>
+    <label><input type="checkbox" id="preAlertSound"> 到達每段的「預先提醒」時間時發出提示音，響 <input class="field" type="number" min="1" max="60" id="preDur"> 秒（數字同時變<b style="color:var(--warn)">黃色</b>）</label>
+    <label><input type="checkbox" id="preBeep"> 最後 5 秒每秒輕響一聲</label>
+  </div>
+
+  <div class="opts">
+    <h2>循環</h2>
+    <label>整套段落重複 <input class="field" type="number" min="1" max="999" id="rounds"> 輪　<span style="color:var(--muted);font-size:15px">（例如運動 40 秒＋休息 20 秒，跑 5 輪）</span></label>
+  </div>
+
+  <div class="row" style="margin-top:28px">
+    <button class="btn primary" id="startBtn">▶ 開始</button>
+  </div>
+
+  <div class="keys">
+    計時中快捷鍵：
+    <kbd>空白鍵</kbd> 暫停／繼續；時間到時進入下一段
+    <kbd>→</kbd> 跳到下一段　<kbd>←</kbd> 回上一段
+    <kbd>R</kbd> 本段重來　<kbd>F</kbd> 全螢幕切換　<kbd>Esc</kbd> 回到設定<br>
+    也可以直接用滑鼠點畫面（等同空白鍵）。設定會自動記在這台電腦的瀏覽器裡。
+  </div>
+</section>
+
+<section id="run">
+  <div id="ctrl">
+    <button class="btn" data-act="prev">⏮ 上一段</button>
+    <button class="btn" data-act="toggle" id="toggleBtn">⏸ 暫停</button>
+    <button class="btn" data-act="restart">↺ 本段重來</button>
+    <button class="btn" data-act="next">⏭ 下一段</button>
+    <button class="btn" data-act="fs">⛶ 全螢幕</button>
+    <button class="btn" data-act="exit">✕ 回設定</button>
+  </div>
+  <div id="segName"></div>
+  <div id="segInfo"></div>
+  <div id="clock">00:00</div>
+  <div id="over"></div>
+  <div id="nextUp"></div>
+  <div id="hint"></div>
+  <div id="bar"></div>
+</section>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const STORE_KEY = 'multi-countdown-v1';
+
+  // ---------- 狀態 ----------
+  let cfg = {
+    segments: [
+      { name: '開場', h: 0, m: 5, s: 0, pm: 1, ps: 0 },
+      { name: '報告', h: 0, m: 10, s: 0, pm: 2, ps: 0 },
+      { name: 'Q&A', h: 0, m: 3, s: 0, pm: 1, ps: 0 },
+    ],
+    dangerSec: 10, soundOn: true, preAlertSound: true, preBeep: true, alarmDur: 3, preDur: 3, rounds: 1, repeatSec: 10, volume: 100,
+  };
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE_KEY));
+    if (saved && Array.isArray(saved.segments)) cfg = Object.assign(cfg, saved);
+  } catch (e) {}
+  const save = () => { try { localStorage.setItem(STORE_KEY, JSON.stringify(cfg)); } catch (e) {} };
+
+  const preSeconds = (g) => (Number(g.pm) || 0) * 60 + (Number(g.ps) || 0);
+  const segSeconds = (g) => (Number(g.h) || 0) * 3600 + (Number(g.m) || 0) * 60 + (Number(g.s) || 0);
+  const fmt = (sec, forceHours) => {
+    sec = Math.max(0, Math.floor(sec));
+    const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+    const p = (n) => String(n).padStart(2, '0');
+    return (h > 0 || forceHours) ? `${h}:${p(m)}:${p(s)}` : `${p(m)}:${p(s)}`;
+  };
+  const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  // ---------- 設定畫面 ----------
+  function renderList() {
+    const list = $('list');
+    list.innerHTML = cfg.segments.map((g, i) => `
+      <div class="seg" data-i="${i}">
+        <div class="no">${i + 1}</div>
+        <input class="field" type="text" data-k="name" placeholder="段落名稱（可留空）" value="${esc(g.name)}">
+        <div class="time">
+          <input class="field" type="number" min="0" max="99" data-k="h" value="${g.h || 0}"><span>時</span>
+          <input class="field" type="number" min="0" max="59" data-k="m" value="${g.m || 0}"><span>分</span>
+          <input class="field" type="number" min="0" max="59" data-k="s" value="${g.s || 0}"><span>秒</span>
+        </div>
+        <div class="time pre" title="剩下這麼多時間時先提醒一次；0 分 0 秒 = 不提醒">
+          <span class="lbl">預先提醒 剩</span>
+          <input class="field" type="number" min="0" max="999" data-k="pm" value="${g.pm || 0}"><span>分</span>
+          <input class="field" type="number" min="0" max="59" data-k="ps" value="${g.ps || 0}"><span>秒</span>
+        </div>
+        <div class="ops">
+          <button class="icon" data-op="up" title="上移" ${i === 0 ? 'disabled' : ''}>▲</button>
+          <button class="icon" data-op="down" title="下移" ${i === cfg.segments.length - 1 ? 'disabled' : ''}>▼</button>
+          <button class="icon" data-op="dup" title="複製">⧉</button>
+          <button class="icon" data-op="del" title="刪除">✕</button>
+        </div>
+      </div>`).join('');
+    renderTotal();
+  }
+  function renderTotal() {
+    const t = cfg.segments.reduce((a, g) => a + segSeconds(g), 0);
+    const R = Math.max(1, cfg.rounds || 1), all = t * R;
+    $('total').textContent = `共 ${cfg.segments.length} 段，每輪 ${fmt(t, t >= 3600)}` + (R > 1 ? ` × ${R} 輪 ＝ 總長 ${fmt(all, all >= 3600)}` : '');
+  }
+  $('list').addEventListener('input', (e) => {
+    const row = e.target.closest('.seg'); if (!row) return;
+    const g = cfg.segments[row.dataset.i], k = e.target.dataset.k;
+    if (k === 'name') g.name = e.target.value;
+    else g[k] = Math.max(0, parseInt(e.target.value, 10) || 0);
+    renderTotal(); save();
+  });
+  $('list').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-op]'); if (!b) return;
+    const i = +b.closest('.seg').dataset.i, S = cfg.segments;
+    if (b.dataset.op === 'up' && i > 0) [S[i - 1], S[i]] = [S[i], S[i - 1]];
+    if (b.dataset.op === 'down' && i < S.length - 1) [S[i + 1], S[i]] = [S[i], S[i + 1]];
+    if (b.dataset.op === 'dup') S.splice(i + 1, 0, { ...S[i] });
+    if (b.dataset.op === 'del') S.splice(i, 1);
+    renderList(); save();
+  });
+  $('addBtn').onclick = () => { cfg.segments.push({ name: '', h: 0, m: 5, s: 0, pm: 1, ps: 0 }); renderList(); save();
+    const inputs = $('list').querySelectorAll('input[data-k=name]'); inputs[inputs.length - 1].focus(); };
+  $('clearBtn').onclick = () => { if (confirm('確定要清除所有段落嗎？')) { cfg.segments = []; renderList(); save(); } };
+
+  const MINS = { alarmDur: 1, preDur: 1, rounds: 1 };
+  [['dangerSec', 'value'], ['soundOn', 'checked'], ['preAlertSound', 'checked'], ['preBeep', 'checked'],
+   ['alarmDur', 'value'], ['preDur', 'value'], ['rounds', 'value'], ['repeatSec', 'value'], ['volume', 'value']].forEach(([id, prop]) => {
+    const el = $(id); el[prop] = cfg[id];
+    el.addEventListener('input', () => {
+      cfg[id] = prop === 'value' ? Math.max(MINS[id] || 0, parseInt(el.value, 10) || 0) : el.checked;
+      if (id === 'rounds') renderTotal(); save(); });
+  });
+
+  // ---------- 聲音（WebAudio，不需網路） ----------
+  let actx = null;
+  function audio() {
+    try { if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+      if (actx.state === 'suspended') actx.resume(); } catch (e) {}
+    return actx;
+  }
+  // 音量：vol 為相對比例（1 = 最大），再乘上使用者設定的音量 %
+  // 包絡：5ms 快速拉到最大 → 全程維持 → 最後 15ms 收尾（避免爆音，同時保持最大響度）
+  function tone(freq, start, dur, vol) {
+    const a = audio(); if (!a) return;
+    const o = a.createOscillator(), g = a.createGain(), t = a.currentTime + start;
+    const v = Math.min(1, vol * (Math.max(10, Math.min(100, cfg.volume || 100)) / 100));
+    o.type = 'square'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(v, t + 0.005);
+    g.gain.setValueAtTime(v, t + dur - 0.015);
+    g.gain.linearRampToValueAtTime(0, t + dur);
+    o.connect(g).connect(a.destination); o.start(t); o.stop(t + dur + 0.02);
+    playing.push(o); o.onended = () => { playing = playing.filter((x) => x !== o); };
+  }
+  let playing = [];
+  function stopSounds() { playing.forEach((o) => { try { o.stop(); } catch (e) {} }); playing = []; }
+  // 在 sec 秒內重複一組音型（每組長 period 秒）
+  function pattern(sec, period, fn) { const n = Math.max(1, Math.round(sec / period)); for (let i = 0; i < n; i++) fn(i * period); }
+  const tick = () => { if (cfg.soundOn && cfg.preBeep) tone(880, 0, 0.08, 0.4); };
+  // 預先提醒：叮—咚，每 1 秒一組，持續 preDur 秒
+  const preAlert = () => { if (!cfg.preAlertSound) return;
+    pattern(cfg.preDur || 3, 1, (t) => { tone(660, t, 0.25, 0.85); tone(880, t + 0.3, 0.35, 0.85); }); };
+  // 時間到：「嗶嗶」（同音高兩短聲）＋停頓，每 1 秒一組，持續 alarmDur 秒 → 預設 3 秒 = 嗶嗶 嗶嗶 嗶嗶
+  const alarm = () => { if (!cfg.soundOn) return;
+    pattern(cfg.alarmDur || 3, 1, (t) => { tone(1046, t, 0.12, 1); tone(1046, t + 0.2, 0.12, 1); }); };
+
+  const volLbl = () => { $('volLbl').textContent = $('volume').value + '%'; };
+  $('volume').addEventListener('input', volLbl); volLbl();
+  $('testAlarm').onclick = () => { stopSounds(); const on = cfg.soundOn; cfg.soundOn = true; alarm(); cfg.soundOn = on; };
+  $('testPre').onclick = () => { stopSounds(); const on = cfg.preAlertSound; cfg.preAlertSound = true; preAlert(); cfg.preAlertSound = on; };
+
+  // ---------- 計時邏輯（以實際時間計算，不會累積誤差） ----------
+  const run = $('run');
+  let rounds = 1, perRound = 0, segs = [], idx = 0, total = 0, preSec = 0, preFired = false, endAt = 0, remainWhenPaused = 0;
+  let state = 'idle'; // running | paused | timeup | done
+  let lastWhole = null, alarmRepeat = null, raf = null, idleTimer = null, wakeLock = null;
+
+  function startAll() {
+    const base = cfg.segments.filter((g) => segSeconds(g) > 0);
+    rounds = Math.max(1, cfg.rounds || 1); perRound = base.length;
+    segs = [];
+    for (let r = 0; r < rounds; r++) base.forEach((g, i) => segs.push({ ...g, round: r + 1, pos: i + 1 }));
+    if (!segs.length) { alert('請至少設定一段大於 0 秒的時間。'); return; }
+    audio(); // 在使用者點擊時解鎖音訊
+    $('setup').style.display = 'none'; run.classList.add('show');
+    enterFullscreen(); requestWake(); poke();
+    loadSeg(0, true);
+    loop();
+  }
+  const segLabel = (g) => g.name.trim() || `第 ${g.pos} 段`;
+  function loadSeg(i, autostart) {
+    clearInterval(alarmRepeat); alarmRepeat = null; stopSounds();
+    idx = Math.max(0, Math.min(segs.length - 1, i));
+    total = segSeconds(segs[idx]);
+    preSec = preSeconds(segs[idx]);
+    if (preSec >= total) preSec = 0; // 提醒時間不小於總長就沒意義，略過
+    preFired = false;
+    run.classList.remove('timeup');
+    $('over').textContent = ''; $('over').className = '';
+    lastWhole = null;
+    if (autostart) { endAt = performance.now() + total * 1000; state = 'running'; }
+    else { remainWhenPaused = total * 1000; state = 'paused'; }
+    const g = segs[idx];
+    $('segName').textContent = segLabel(g);
+    $('segInfo').textContent = `第 ${g.pos} / ${perRound} 段` + (rounds > 1 ? `　・　第 ${g.round} / ${rounds} 輪` : '');
+    const n = segs[idx + 1];
+    $('nextUp').textContent = n ? `下一段：${segLabel(n)}（${fmt(segSeconds(n))}）` + (n.round !== g.round ? `　← 進入第 ${n.round} 輪` : '') : '這是最後一段';
+    fitClock(fmt(total)); render();
+  }
+  function remainingMs() {
+    if (state === 'running') return endAt - performance.now();
+    if (state === 'paused') return remainWhenPaused;
+    if (state === 'timeup') return endAt - performance.now(); // 負值 = 超時
+    return 0;
+  }
+  function render() {
+    const ms = remainingMs();
+    const clock = $('clock'), bar = $('bar');
+    let remain = Math.ceil(Math.max(0, ms) / 1000);
+
+    if (state === 'running' && ms <= 0) {
+      state = 'timeup'; timeUp();
+    }
+    if (state === 'running' && preSec > 0 && !preFired && Math.ceil(ms / 1000) <= preSec) {
+      preFired = true; preAlert();
+    }
+    if (state === 'timeup' || state === 'done') remain = 0;
+
+    const text = fmt(remain, total >= 3600);
+    if (clock.textContent !== text) { clock.textContent = text; }
+
+    const level = state === 'done' ? '' : ((state === 'timeup' || remain <= cfg.dangerSec) ? 'danger' : (preSec > 0 && remain <= preSec ? 'warn' : ''));
+    clock.className = level; bar.className = level;
+    bar.style.width = (total && state !== 'done' ? (1 - Math.max(0, ms) / (total * 1000)) * 100 : 100) + '%';
+
+    if (state === 'running' && remain !== lastWhole) {
+      if (lastWhole !== null && remain <= 5 && remain > 0) tick();
+      lastWhole = remain;
+    }
+    const over = $('over');
+    if (state === 'timeup') {
+      over.className = ''; over.textContent = `時間到！已超時 +${fmt(Math.floor(-ms / 1000))}`;
+    } else if ((state === 'running' || state === 'paused') && preSec > 0 && remain <= preSec && remain > cfg.dangerSec) {
+      over.className = 'pre'; over.textContent = `提醒：剩下 ${fmt(remain)}`;
+    } else if (state !== 'done') { over.className = ''; over.textContent = ''; }
+    run.classList.toggle('paused', state === 'paused');
+    $('toggleBtn').textContent = state === 'paused' ? '▶ 繼續' : '⏸ 暫停';
+    $('hint').textContent =
+      state === 'paused' ? '已暫停 — 按空白鍵繼續' :
+      state === 'timeup' ? (idx < segs.length - 1 ? '按空白鍵（或點畫面）開始下一段' : '按空白鍵結束') :
+      state === 'done' ? '全部完成！按 Esc 回到設定' : '';
+  }
+  function timeUp() {
+    run.classList.add('timeup');
+    alarm();
+    if (cfg.repeatSec > 0) alarmRepeat = setInterval(alarm, cfg.repeatSec * 1000); // 沒人按的話每隔 repeatSec 秒再提醒（0 = 只響一次）
+    poke();
+  }
+  function loop() {
+    cancelAnimationFrame(raf);
+    const step = () => { render(); raf = requestAnimationFrame(step); };
+    raf = requestAnimationFrame(step);
+  }
+
+  function primary() { // 空白鍵 / 點擊畫面
+    audio();
+    if (state === 'running') pause();
+    else if (state === 'paused') resume();
+    else if (state === 'timeup') {
+      if (idx < segs.length - 1) loadSeg(idx + 1, true);
+      else finish();
+    }
+  }
+  function pause() { remainWhenPaused = endAt - performance.now(); state = 'paused'; render(); }
+  function resume() { endAt = performance.now() + remainWhenPaused; state = 'running'; render(); }
+  function finish() {
+    clearInterval(alarmRepeat); alarmRepeat = null; stopSounds();
+    state = 'done'; run.classList.remove('timeup');
+    $('segName').textContent = '全部完成'; $('segInfo').textContent = `共 ${perRound} 段` + (rounds > 1 ? ` × ${rounds} 輪` : '');
+    $('nextUp').textContent = ''; $('over').textContent = '';
+    render();
+  }
+  function exitRun() {
+    cancelAnimationFrame(raf); clearInterval(alarmRepeat); alarmRepeat = null; stopSounds(); state = 'idle';
+    run.classList.remove('show', 'timeup'); $('setup').style.display = '';
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+  }
+  function act(a) {
+    if (state === 'idle') return;
+    if (a === 'toggle') primary();
+    if (a === 'next') { if (idx < segs.length - 1) loadSeg(idx + 1, true); else finish(); }
+    if (a === 'prev') loadSeg(idx - 1, true);
+    if (a === 'restart') { if (state === 'done') loadSeg(segs.length - 1, true); else loadSeg(idx, true); }
+    if (a === 'fs') toggleFullscreen();
+    if (a === 'exit') exitRun();
+  }
+
+  // ---------- 字體自動撐滿畫面 ----------
+  let fitFor = '';
+  function fitClock(sample) {
+    fitFor = sample.replace(/\d/g, '0'); // 以最寬的字形估算
+    const clock = $('clock');
+    const probe = document.createElement('span');
+    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font-weight:800;font-size:100px;font-variant-numeric:tabular-nums;letter-spacing:-0.02em;';
+    probe.style.fontFamily = getComputedStyle(clock).fontFamily;
+    probe.textContent = fitFor; document.body.appendChild(probe);
+    const w = probe.getBoundingClientRect().width; probe.remove();
+    const byWidth = (window.innerWidth * 0.96) / w * 100;
+    const byHeight = window.innerHeight * 0.55;
+    clock.style.fontSize = Math.floor(Math.min(byWidth, byHeight)) + 'px';
+  }
+  window.addEventListener('resize', () => { if (state !== 'idle') fitClock(fitFor || '00:00'); });
+
+  // ---------- 全螢幕 / 螢幕常亮 / 控制列自動隱藏 ----------
+  function enterFullscreen() { const el = document.documentElement; if (el.requestFullscreen && !document.fullscreenElement) el.requestFullscreen().catch(() => {}); }
+  function toggleFullscreen() { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); else enterFullscreen(); }
+  async function requestWake() { try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {} }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && state !== 'idle') requestWake(); });
+  function poke() { run.classList.remove('idle'); clearTimeout(idleTimer); idleTimer = setTimeout(() => run.classList.add('idle'), 2500); }
+  run.addEventListener('mousemove', poke);
+
+  // ---------- 事件 ----------
+  $('startBtn').onclick = startAll;
+  $('ctrl').addEventListener('click', (e) => { const b = e.target.closest('button[data-act]'); if (b) { e.stopPropagation(); act(b.dataset.act); poke(); } });
+  run.addEventListener('click', () => { if (state !== 'idle') primary(); });
+  document.addEventListener('keydown', (e) => {
+    if (state === 'idle') return;
+    const k = e.key;
+    if (k === ' ' || k === 'Enter') { e.preventDefault(); primary(); }
+    else if (k === 'ArrowRight') act('next');
+    else if (k === 'ArrowLeft') act('prev');
+    else if (k === 'r' || k === 'R') act('restart');
+    else if (k === 'f' || k === 'F') act('fs');
+    else if (k === 'Escape') act('exit');
+  });
+
+  renderList();
+})();
+</script>
+</body>
+</html>
